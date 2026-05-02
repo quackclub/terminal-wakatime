@@ -30,9 +30,7 @@ func TestExecuteFunction(t *testing.T) {
 
 	// This will exit the program, so we need to catch that
 	defer func() {
-		if r := recover(); r != nil {
-			// Expected behavior for help command
-		}
+		_ = recover()
 	}()
 
 	// We can't easily test execute() without it calling os.Exit()

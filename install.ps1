@@ -88,6 +88,24 @@ function Test-ParseablePowerShell {
     }
 }
 
+function Test-TerminalWakaTimeHookScript {
+    param([string]$ScriptText)
+
+    if ([string]::IsNullOrWhiteSpace($ScriptText)) {
+        return $false
+    }
+
+    if (-not (Test-ParseablePowerShell $ScriptText)) {
+        return $false
+    }
+
+    $hasPrecmd = $ScriptText -match 'function\s+__terminal_wakatime_precmd'
+    $hasPrompt = $ScriptText -match 'function\s+global:prompt'
+    $hasValidation = $ScriptText -match 'Set-PSReadLineOption'
+
+    return ($hasPrecmd -and $hasPrompt -and $hasValidation)
+}
+
 function Get-SafeInitBlock {
     return @"
 `$twBinary = Join-Path `$twInstallDir 'terminal-wakatime'
@@ -95,8 +113,9 @@ if (`$IsWindows) { `$twBinary = "`$twBinary.exe" }
 if (Test-Path -LiteralPath `$twBinary) {
     `$twHooks = & `$twBinary init powershell 2>`$null
     `$twHooksText = [string]::Join([Environment]::NewLine, @(`$twHooks))
+    `$twHasExpectedSignatures = (`$twHooksText -match 'function\s+__terminal_wakatime_precmd') -and (`$twHooksText -match 'function\s+global:prompt') -and (`$twHooksText -match 'Set-PSReadLineOption')
     `$twCanParseHooks = `$false
-    if (-not [string]::IsNullOrWhiteSpace(`$twHooksText)) {
+    if (`$twHasExpectedSignatures -and -not [string]::IsNullOrWhiteSpace(`$twHooksText)) {
         try {
             [ScriptBlock]::Create(`$twHooksText) | Out-Null
             `$twCanParseHooks = `$true
@@ -158,7 +177,7 @@ function Add-ProfileIntegration {
         "`$twBinary = Join-Path `$twInstallDir 'terminal-wakatime'"
     )
 
-    # Migrate direct Invoke-Expression on hook text to parse-checked version
+    # Migrate direct Invoke-Expression on hook text to signature+parse-checked version
     $legacyEvalSnippet = @'
 $twHooksText = [string]::Join([Environment]::NewLine, @($twHooks))
 if (-not [string]::IsNullOrWhiteSpace($twHooksText)) {
@@ -167,8 +186,9 @@ if (-not [string]::IsNullOrWhiteSpace($twHooksText)) {
 '@
     $guardedEvalSnippet = @'
 $twHooksText = [string]::Join([Environment]::NewLine, @($twHooks))
+$twHasExpectedSignatures = ($twHooksText -match 'function\s+__terminal_wakatime_precmd') -and ($twHooksText -match 'function\s+global:prompt') -and ($twHooksText -match 'Set-PSReadLineOption')
 $twCanParseHooks = $false
-if (-not [string]::IsNullOrWhiteSpace($twHooksText)) {
+if ($twHasExpectedSignatures -and -not [string]::IsNullOrWhiteSpace($twHooksText)) {
     try {
         [ScriptBlock]::Create($twHooksText) | Out-Null
         $twCanParseHooks = $true
@@ -236,11 +256,11 @@ try {
             $sessionHooks = & $targetPath init powershell 2>$null
             $sessionHooksText = [string]::Join([Environment]::NewLine, @($sessionHooks))
 
-            if (Test-ParseablePowerShell $sessionHooksText) {
+            if (Test-TerminalWakaTimeHookScript $sessionHooksText) {
                 Invoke-Expression $sessionHooksText
                 Write-Success 'Initialized terminal-wakatime hooks for this session.'
             } else {
-                Write-WarningMsg 'Binary returned empty or non-PowerShell hooks; skipping session initialization.'
+                Write-WarningMsg 'Binary returned empty, unexpected, or non-PowerShell hooks; skipping session initialization.'
             }
         } catch {
             Write-WarningMsg "Installed successfully, but failed to initialize hooks in current session: $($_.Exception.Message)"

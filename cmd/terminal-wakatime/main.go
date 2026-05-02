@@ -224,7 +224,9 @@ func heartbeatCmd() *cobra.Command {
 	cmd.Flags().String("branch", "", "Git branch")
 	cmd.Flags().Bool("write", false, "Mark as write operation")
 
-	cmd.MarkFlagRequired("entity")
+	if err := cmd.MarkFlagRequired("entity"); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to mark 'entity' flag as required: %v\n", err)
+	}
 
 	return cmd
 }
@@ -237,6 +239,10 @@ func runHeartbeatCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	entity, _ := cmd.Flags().GetString("entity")
+	if entity == "" {
+		return fmt.Errorf("entity is required (use --entity flag)")
+	}
+
 	entityType, _ := cmd.Flags().GetString("entity-type")
 	category, _ := cmd.Flags().GetString("category")
 	language, _ := cmd.Flags().GetString("language")
@@ -396,7 +402,9 @@ func runDepsCommand(cmd *cobra.Command, args []string) error {
 
 	if reinstall {
 		// Remove existing binary
-		os.Remove(wakatimeCLI.BinaryPath())
+		if err := os.Remove(wakatimeCLI.BinaryPath()); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove existing wakatime-cli binary: %w", err)
+		}
 	}
 
 	fmt.Println("Installing/updating WakaTime CLI...")
@@ -493,10 +501,22 @@ func formatKey(key string) string {
 	parts := strings.Split(key, "_")
 	for i, part := range parts {
 		if part != "" {
-			parts[i] = strings.Title(part)
+			parts[i] = titleCase(part)
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+func titleCase(value string) string {
+	if value == "" {
+		return ""
+	}
+
+	if len(value) == 1 {
+		return strings.ToUpper(value)
+	}
+
+	return strings.ToUpper(value[:1]) + strings.ToLower(value[1:])
 }
 
 func truncateString(s string, maxLen int) string {
@@ -542,7 +562,9 @@ manual updates and testing.`,
 
 			if !isNewer {
 				fmt.Printf("You're already running the latest version (%s)\n", cfg.PluginVersion())
-				upd.UpdateLastCheckTime()
+				if err := upd.UpdateLastCheckTime(); err != nil {
+					return fmt.Errorf("failed to record update check time: %w", err)
+				}
 				return nil
 			}
 
